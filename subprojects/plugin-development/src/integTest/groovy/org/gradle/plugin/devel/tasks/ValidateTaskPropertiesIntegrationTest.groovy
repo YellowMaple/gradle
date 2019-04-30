@@ -18,9 +18,12 @@ package org.gradle.plugin.devel.tasks
 
 import org.gradle.api.artifacts.transform.InputArtifact
 import org.gradle.api.artifacts.transform.InputArtifactDependencies
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.FileCollection
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.model.ReplacedBy
+import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Console
 import org.gradle.api.tasks.Destroys
 import org.gradle.api.tasks.Input
@@ -38,6 +41,7 @@ import org.gradle.api.tasks.options.OptionValues
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import org.intellij.lang.annotations.Language
 import spock.lang.Unroll
 
 import javax.inject.Inject
@@ -385,6 +389,52 @@ class ValidateTaskPropertiesIntegrationTest extends AbstractIntegrationSpec {
         succeeds "validateTaskProperties"
 
         file("build/reports/task-properties/report.txt").text == ""
+    }
+
+    @Unroll
+    def "report setters for property with mutable type #type"() {
+        @Language("JAVA") myTask = """
+            import org.gradle.api.DefaultTask;
+            import org.gradle.api.tasks.InputFiles;
+
+            public class MyTask extends DefaultTask {
+                // no field, just getter and setter
+                @InputFiles public ${type} getMutablePropertyWithSetter() { return null; } 
+                public void setMutablePropertyWithSetter(${type} value) {} 
+
+                // no field, just getters
+                @InputFiles public ${type} getMutablePropertyWithoutSetter() { return null; } 
+
+                // no field, just setter
+                public void setMutablePropertyWithoutGetter() {} 
+
+                // field with getter and setter
+                private ${type} fieldWithGetterAndSetter;                
+                @InputFiles public ${type} getFieldWithGetterAndSetter() { return null; } 
+                public void setFieldWithGetterAndSetter(${type} value) {} 
+                
+                // final field with constructor and getter
+                private final ${type} finalFieldWithoutSetter; 
+                MyTask() { finalFieldWithoutSetter = null; } 
+                @InputFiles public ${type} getSources() { return null; } 
+                
+            }
+        """
+        file("src/main/java/MyTask.java") << myTask
+
+        when:
+        fails "validateTaskProperties"
+
+        then:
+        def simpleType = type.replaceAll("<.+>", "")
+        def lines = file("build/reports/task-properties/report.txt").readLines()
+        lines.toSet() == [
+            "Warning: Type 'MyTask': 'fieldWithGetterAndSetter' of type '${simpleType}' has redundant setter method.",
+            "Warning: Type 'MyTask': 'mutablePropertyWithSetter' of type '${simpleType}' has redundant setter method."
+        ].toSet()
+
+        where:
+        type << [ConfigurableFileCollection.name, "${Property.name}<String>", RegularFileProperty.name]
     }
 
     def "detects problems with file inputs"() {

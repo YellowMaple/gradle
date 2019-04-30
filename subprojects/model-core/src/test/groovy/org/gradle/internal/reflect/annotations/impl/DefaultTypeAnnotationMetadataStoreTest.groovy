@@ -18,7 +18,9 @@ package org.gradle.internal.reflect.annotations.impl
 
 import groovy.transform.Generated
 import groovy.transform.PackageScope
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.FileCollection
+import org.gradle.api.provider.Property
 import org.gradle.cache.internal.TestCrossBuildInMemoryCacheFactory
 import org.gradle.internal.reflect.AnnotationCategory
 import org.gradle.internal.reflect.ParameterValidationContext
@@ -51,6 +53,9 @@ class DefaultTypeAnnotationMetadataStoreTest extends Specification {
         ], [
             Object,
             GroovyObject
+        ],[
+            ConfigurableFileCollection,
+            Property
         ],
         Ignored,
         { Method method -> method.isAnnotationPresent(Generated) },

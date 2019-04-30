@@ -44,6 +44,8 @@ import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
@@ -58,6 +60,7 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.joining;
+import static org.gradle.internal.Cast.uncheckedNonnullCast;
 import static org.gradle.internal.reflect.AnnotationCategory.TYPE;
 import static org.gradle.internal.reflect.Methods.SIGNATURE_EQUIVALENCE;
 
@@ -88,6 +91,7 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
     private final CrossBuildInMemoryCache<Class<?>, TypeAnnotationMetadata> cache;
     private final Set<String> potentiallyIgnoredMethodNames;
     private final Set<Equivalence.Wrapper<Method>> globallyIgnoredMethods;
+    private final Set<Class<?>> mutableNonFinalClasses;
     private final Class<? extends Annotation> ignoredMethodAnnotation;
     private final Predicate<? super Method> generatedMethodDetector;
 
@@ -100,6 +104,7 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
      * @param ignoreMethodsFromTypes Methods to ignore: any methods declared by these types are ignored even when overriden by a given type. This is to avoid detecting methods like {@code Object.equals()} or {@code GroovyObject.getMetaClass()}.
      * @param ignoredMethodAnnotation Annotation to use to explicitly ignore a method/property.
      * @param generatedMethodDetector Predicate to test if a method was generated (vs. being provided explicitly by the user).
+     * @param mutableNonFinalClasses Mutable classes that shouldn't need explicit setters
      * @param cacheFactory A factory to create cross-build in-memory caches.
      */
     public DefaultTypeAnnotationMetadataStore(
@@ -107,6 +112,7 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
         Map<Class<? extends Annotation>, ? extends AnnotationCategory> propertyAnnotationCategories,
         Collection<Class<?>> ignoredSuperTypes,
         Collection<Class<?>> ignoreMethodsFromTypes,
+        Collection<Class<?>> mutableNonFinalClasses,
         Class<? extends Annotation> ignoredMethodAnnotation,
         Predicate<? super Method> generatedMethodDetector,
         CrossBuildInMemoryCacheFactory cacheFactory
@@ -125,6 +131,7 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
         this.generatedMethodDetector = generatedMethodDetector;
         this.potentiallyIgnoredMethodNames = allMethodNamesOf(ignoreMethodsFromTypes);
         this.globallyIgnoredMethods = allMethodsOf(ignoreMethodsFromTypes);
+        this.mutableNonFinalClasses = ImmutableSet.copyOf(mutableNonFinalClasses);
     }
 
     private static ImmutableSet<String> allMethodNamesOf(Iterable<Class<?>> classes) {
@@ -311,6 +318,7 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
             return;
         } else if (accessorType == PropertyAccessorType.SETTER) {
             validateNotAnnotated("setter", method, annotations.keySet(), errorsBuilder);
+            validateSetterForMutableType(accessorType, method, errorsBuilder);
             return;
         }
 
@@ -346,6 +354,34 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
 
         for (Annotation annotation : annotations.values()) {
             metadataBuilder.declareAnnotation(annotation);
+        }
+    }
+
+    private void validateSetterForMutableType(PropertyAccessorType accessorType, Method method, ValidationErrorsBuilder errorsBuilder) {
+        Class<?> setterClass = getSetterClassOrNull(accessorType, method);
+        if (setterClass == null) {
+            return;
+        }
+        mutableNonFinalClasses.stream()
+            .filter(c -> c.isAssignableFrom(setterClass)).findAny()
+            .ifPresent(c -> {
+                String propertyName = accessorType.propertyNameFor(method);
+                String typeName = setterClass.getTypeName();
+                errorsBuilder.recordError(String.format("'%s' of type '%s' has redundant setter method.", propertyName, typeName));
+            });
+    }
+
+    @Nullable
+    private static Class<?> getSetterClassOrNull(PropertyAccessorType accessorType, Method method) {
+        Type setterType = accessorType.propertyTypeFor(method);
+        if (setterType instanceof ParameterizedType) {
+            setterType = ((ParameterizedType) setterType).getRawType();
+        }
+
+        if (setterType instanceof Class<?>) {
+            return uncheckedNonnullCast(setterType);
+        } else {
+            return null;
         }
     }
 

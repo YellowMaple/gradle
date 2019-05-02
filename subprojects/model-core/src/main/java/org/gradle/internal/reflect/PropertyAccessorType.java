@@ -34,6 +34,11 @@ public enum PropertyAccessorType {
     IS_GETTER(2) {
         @Override
         public Type propertyTypeFor(Method method) {
+            return method.getReturnType();
+        }
+
+        @Override
+        public Type genericPropertyTypeFor(Method method) {
             return method.getGenericReturnType();
         }
     },
@@ -41,6 +46,11 @@ public enum PropertyAccessorType {
     GET_GETTER(3) {
         @Override
         public Type propertyTypeFor(Method method) {
+            return method.getReturnType();
+        }
+
+        @Override
+        public Type genericPropertyTypeFor(Method method) {
             return method.getGenericReturnType();
         }
     },
@@ -48,11 +58,20 @@ public enum PropertyAccessorType {
     SETTER(3) {
         @Override
         public Type propertyTypeFor(Method method) {
-            Type[] parameterTypes = method.getGenericParameterTypes();
-            if (parameterTypes.length != 1) {
+            requireSingleParam(method);
+            return method.getParameterTypes()[0];
+        }
+
+        @Override
+        public Type genericPropertyTypeFor(Method method) {
+            requireSingleParam(method);
+            return method.getGenericParameterTypes()[0];
+        }
+
+        private void requireSingleParam(Method method) {
+            if (method.getParameterCount() != 1) {
                 throw new IllegalArgumentException("Setter method should take one parameter: " + method);
             }
-            return parameterTypes[0];
         }
     };
 
@@ -72,6 +91,8 @@ public enum PropertyAccessorType {
     }
 
     public abstract Type propertyTypeFor(Method method);
+
+    public abstract Type genericPropertyTypeFor(Method method);
 
     @Nullable
     public static PropertyAccessorType of(Method method) {

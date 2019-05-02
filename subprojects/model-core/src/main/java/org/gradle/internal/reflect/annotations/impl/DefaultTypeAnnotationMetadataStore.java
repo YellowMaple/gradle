@@ -44,7 +44,6 @@ import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.Collection;
@@ -358,31 +357,22 @@ public class DefaultTypeAnnotationMetadataStore implements TypeAnnotationMetadat
     }
 
     private void validateSetterForMutableType(PropertyAccessorType accessorType, Method method, ValidationErrorsBuilder errorsBuilder) {
-        Class<?> setterClass = getSetterClassOrNull(accessorType, method);
-        if (setterClass == null) {
-            return;
+        Type setterType = accessorType.propertyTypeFor(method);
+        if (isRedundant(setterType)) {
+            String propertyName = accessorType.propertyNameFor(method);
+            String typeName = setterType.getTypeName();
+            errorsBuilder.recordError(String.format("'%s' of type '%s' has redundant setter method.", propertyName, typeName));
         }
-        mutableNonFinalClasses.stream()
-            .filter(c -> c.isAssignableFrom(setterClass)).findAny()
-            .ifPresent(c -> {
-                String propertyName = accessorType.propertyNameFor(method);
-                String typeName = setterClass.getTypeName();
-                errorsBuilder.recordError(String.format("'%s' of type '%s' has redundant setter method.", propertyName, typeName));
-            });
     }
 
-    @Nullable
-    private static Class<?> getSetterClassOrNull(PropertyAccessorType accessorType, Method method) {
-        Type setterType = accessorType.propertyTypeFor(method);
-        if (setterType instanceof ParameterizedType) {
-            setterType = ((ParameterizedType) setterType).getRawType();
+    private boolean isRedundant(Type setter) {
+        if (!(setter instanceof Class<?>)) {
+            return false;
         }
 
-        if (setterType instanceof Class<?>) {
-            return uncheckedNonnullCast(setterType);
-        } else {
-            return null;
-        }
+        Class<?> setterClass = uncheckedNonnullCast(setter);
+        return mutableNonFinalClasses.stream()
+            .anyMatch(prohibited -> prohibited.isAssignableFrom(setterClass));
     }
 
     private void visitSuperTypes(Class<?> type, Consumer<? super TypeAnnotationMetadata> visitor) {
